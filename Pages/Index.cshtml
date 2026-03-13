@@ -1,0 +1,196 @@
+﻿@page
+@model RecipeSPA.Pages.IndexModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Список рецептов</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <style>
+        body { background: #f5f5f5; }
+        .card { box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+        #formSection { display: none; }
+        .recipe-row:hover { background: #e9f5ff; cursor: pointer; }
+    </style>
+</head>
+<body>
+<div class="container py-4" style="max-width:900px">
+    <!-- ===== СПИСОК ===== -->
+    <div id="listSection">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h1>Список рецептов</h1>
+            <button class="btn btn-success" onclick="showCreateForm()">+ Добавить</button>
+        </div>
+        <table class="table table-striped" id="recipeTable">
+            <thead class="table-dark">
+                <tr>
+                    <th>Название</th>
+                    <th>Ингредиенты</th>
+                    <th>Инструкции</th>
+                    <th style="width:200px">Действия</th>
+                </tr>
+            </thead>
+            <tbody id="recipeBody"></tbody>
+        </table>
+        <div id="emptyMsg" class="alert alert-info" style="display:none">Рецептов пока нет.</div>
+    </div>
+    <!-- ===== ФОРМА (создание / редактирование) ===== -->
+    <div id="formSection">
+        <h2 id="formTitle">Добавить рецепт</h2>
+        <div class="card p-4">
+            <input type="hidden" id="recipeId" />
+            <div class="mb-3">
+                <label class="form-label">Название</label>
+                <input type="text" id="recipeName" class="form-control" />
+                <div class="text-danger" id="nameError"></div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Ингредиенты</label>
+                <textarea id="recipeIngredients" class="form-control" rows="4"
+                          placeholder="Перечислите ингредиенты"></textarea>
+                <div class="text-danger" id="ingredientsError"></div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Инструкции</label>
+                <textarea id="recipeInstructions" class="form-control" rows="5"
+                          placeholder="Пошаговые инструкции"></textarea>
+                <div class="text-danger" id="instructionsError"></div>
+            </div>
+            <div>
+                <button class="btn btn-primary" onclick="saveRecipe()">Сохранить</button>
+                <button class="btn btn-secondary ms-2" onclick="showList()">Отмена</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    // ── Антифоргери-��окен из куки ───────────────────────────
+    function getToken() {
+        const cookie = document.cookie.split(';').find(c => c.trim().startsWith('.AspNetCore.Antiforgery'));
+        return cookie ? cookie.split('=')[1] : '';
+    }
+    // Получаем токен из скрытого поля, которое Razor генерирует
+    // Но проще передавать через заголовок - зарегистрируем токен вручную
+    const TOKEN_HEADER = 'RequestVerificationToken';
+    let antiforgeryToken = '';
+    // ── Навигация между секциями ────────────────────────────
+    function showList() {
+        document.getElementById('listSection').style.display = '';
+        document.getElementById('formSection').style.display = 'none';
+        loadRecipes();
+    }
+    function showCreateForm() {
+        document.getElementById('formTitle').textContent = 'Добавить рецепт';
+        document.getElementById('recipeId').value = '';
+        document.getElementById('recipeName').value = '';
+        document.getElementById('recipeIngredients').value = '';
+        document.getElementById('recipeInstructions').value = '';
+        clearErrors();
+        document.getElementById('listSection').style.display = 'none';
+        document.getElementById('formSection').style.display = '';
+    }
+    function showEditForm(id) {
+        fetch('?handler=Recipe&id=' + id)
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('formTitle').textContent = 'Редактировать рецепт';
+                document.getElementById('recipeId').value = data.id;
+                document.getElementById('recipeName').value = data.name;
+                document.getElementById('recipeIngredients').value = data.ingredients;
+                document.getElementById('recipeInstructions').value = data.instructions;
+                clearErrors();
+                document.getElementById('listSection').style.display = 'none';
+                document.getElementById('formSection').style.display = '';
+            });
+    }
+    // ── Загрузка списка ─────────────────────────────────────
+    function loadRecipes() {
+        fetch('?handler=Recipes')
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('recipeBody');
+                tbody.innerHTML = '';
+                document.getElementById('emptyMsg').style.display = data.length ? 'none' : '';
+                data.forEach(r => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'recipe-row';
+                    tr.innerHTML =
+                        '<td><strong>' + esc(r.name) + '</strong></td>' +
+                        '<td style="white-space:pre-line">' + esc(r.ingredients) + '</td>' +
+                        '<td style="white-space:pre-line">' + esc(r.instructions) + '</td>' +
+                        '<td>' +
+                            '<button class="btn btn-sm btn-primary me-1" onclick="showEditForm(\'' + r.id + '\')">Редактировать</button>' +
+                            '<button class="btn btn-sm btn-danger" onclick="deleteRecipe(\'' + r.id + '\')">Удалить</button>' +
+                        '</td>';
+                    tbody.appendChild(tr);
+                });
+            });
+    }
+    // ── Сохранение (создание или обновление) ────────────────
+    function saveRecipe() {
+        clearErrors();
+        const name = document.getElementById('recipeName').value.trim();
+        const ingredients = document.getElementById('recipeIngredients').value.trim();
+        const instructions = document.getElementById('recipeInstructions').value.trim();
+        const id = document.getElementById('recipeId').value;
+        let valid = true;
+        if (!name)         { document.getElementById('nameError').textContent = 'Введите название';          valid = false; }
+        if (!ingredients)  { document.getElementById('ingredientsError').textContent = 'Укажите ингредиенты'; valid = false; }
+        if (!instructions) { document.getElementById('instructionsError').textContent = 'Опишите инструкции'; valid = false; }
+        if (!valid) return;
+        const handler = id ? 'Update' : 'Create';
+        const body = { id: id || '00000000-0000-0000-0000-000000000000', name, ingredients, instructions };
+        fetch('?handler=' + handler, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                [TOKEN_HEADER]: antiforgeryToken
+            },
+            body: JSON.stringify(body)
+        })
+        .then(r => r.json())
+        .then(() => showList());
+    }
+    // ── Удаление ────────────────────────────────────────────
+    function deleteRecipe(id) {
+        if (!confirm('Удалить этот рецепт?')) return;
+        fetch('?handler=DeleteItem', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                [TOKEN_HEADER]: antiforgeryToken
+            },
+            body: JSON.stringify({ id })
+        })
+        .then(r => r.json())
+        .then(() => loadRecipes());
+    }
+    // ── Утилиты ─────────────────────────────────────────────
+    function esc(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+    function clearErrors() {
+        document.getElementById('nameError').textContent = '';
+        document.getElementById('ingredientsError').textContent = '';
+        document.getElementById('instructionsError').textContent = '';
+    }
+    // ── Инициализация ───────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        // Получаем antiforgery-токен: делаем скрытую форму чтобы Razor сгенерировал его
+        const tokenEl = document.querySelector('input[name="__RequestVerificationToken"]');
+        if (tokenEl) antiforgeryToken = tokenEl.value;
+        loadRecipes();
+    });
+</script>
+<!-- Razor генерирует скрытый antiforgery-токен -->
+<form id="__tokenForm" method="post" style="display:none">
+    @Html.AntiForgeryToken()
+</form>
+</body>
+</html>
